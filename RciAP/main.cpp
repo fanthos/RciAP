@@ -60,6 +60,10 @@ int doreply(const int len, cuchar recv[], uchar buf[]) {
 				buf[4] = 2;
 				retlen = 2;
 				break;
+			case 0x03:
+				rbuf[0] = 1;
+				retlen = 1;
+				break;
 			case 0x07: // get ipod name
 				WRITERET(R(0007),rbuf, retlen);
 				break;
