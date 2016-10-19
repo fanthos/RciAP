@@ -5,6 +5,17 @@
 
 typedef const unsigned char cuchar;
 typedef unsigned char uchar;
+typedef unsigned int uint;
+
+uchar calcsum(cuchar *buf, uint len) {
+	uchar sum = 0;
+	cuchar *buf1 = buf + len;
+	while(buf < buf1) {
+		sum -= *buf;
+		buf++;
+	}
+	return sum;
+}
 
 cuchar
 	NONE = 0,
@@ -19,16 +30,42 @@ void playctrl(cuchar action) {
 	Serial.println(action, HEX);
 }
 
-void procunkcmd(const int len, cuchar recv[]) {
+void procunkcmd(const uint len, cuchar recv[]) {
 	Serial.print("Unknown Cmd: ");
-	for(int _i = 0; _i < len; _i++){
+	for(uint _i = 0; _i < len; _i++){
 		Serial.print(recv[_i]);
 		Serial.print(" ");
 	}
 	Serial.println("");
 }
 
-int doreply(const int len, cuchar recv[], uchar buf[]) {
+void serialwrite(cuchar buf[], const uint len) {
+	static unsigned long lastsent = 0;
+	unsigned long newsent = millis();
+	const uint sendinterval = 50;
+	unsigned long t = newsent - lastsent;
+	if(t < sendinterval) {
+		delay(sendinterval - t);
+	}
+	lastsent = newsent;
+	Serial1.write(buf, len);
+}
+
+volatile uchar sendbuf_data[140] = {0xff, 0x55};
+const volatile uchar *sendbuf = sendbuf_data + 3;
+volatile uint sendbuflen;
+volatile uchar sendbufready = 0;
+
+void processsendbuf() {
+	if(sendbufready == 0)return;
+	Serial.println("ProcBuf");
+	sendbuf_data[2] = (uchar)sendbuflen;
+	sendbuf_data[sendbuflen + 3] = calcsum((uchar*)sendbuf_data + 2, sendbuflen + 1);
+	serialwrite((uchar *)sendbuf_data, sendbuflen + 4);
+	sendbufready = 0;
+}
+
+uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 	cuchar
 		//retdata00ack[] = {0,0},
 		retdata0007[] = "MYBT1",
@@ -44,7 +81,9 @@ int doreply(const int len, cuchar recv[], uchar buf[]) {
 		retdata04_01[] = {0,0,0,1},
 		retdata04_0101[] = {0,0,0,1,0,0,0,1},
 		retdata041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1};
-	int retlen, i, j;
+	cuchar retdataary0028[] = {1,4,4,4,5,6,7};
+	cuchar retdatabuf0013[] = {0x00, 0x27, 0x00};
+	uint retlen;
 	buf[0] = 0xff;
 	buf[1] = 0x55;
 
@@ -53,8 +92,14 @@ int doreply(const int len, cuchar recv[], uchar buf[]) {
 		buf[3] = 0;
 		buf[4] = recv[1] + 1;
 		switch(recv[1]) {
-			case 0x05: // switch to remote ui
 			case 0x13: // Get Device Lingoes
+				if(sendbufready == 0) {
+					memcpy((void*)sendbuf, retdatabuf0013, sizeof(retdatabuf0013));
+					sendbuflen = 3;
+					sendbufready = 1;
+				}
+				// fall to ACK
+			case 0x05: // switch to remote ui
 				rbuf[0] = 0;
 				rbuf[1] = recv[1];
 				buf[4] = 2;
@@ -79,6 +124,14 @@ int doreply(const int len, cuchar recv[], uchar buf[]) {
 			case 0x0F: // set lingo protocol version
 				WRITERET(R(000F),rbuf, retlen);
 				rbuf[0] = recv[2];
+				break;
+			case 0x28:
+				rbuf[0] = retdataary0028[recv[2]];
+				if(rbuf[0] > sizeof(retdataary0028)){
+					return 0;
+				}
+				retlen = 1;
+				buf[4] = 0x27;
 				break;
 			default:
 				rbuf[0] = 5;
@@ -174,10 +227,8 @@ int doreply(const int len, cuchar recv[], uchar buf[]) {
 	}
 
 	buf[2] = retlen;
-	for(i = 2, j = 0; i < retlen + 3; i++) {
-		j += buf[i];
-	}
-	buf[retlen + 3] = 0 - j;
+
+	buf[retlen + 3] = calcsum(buf + 2, retlen + 1);
 	return retlen + 4;
 }
 
@@ -189,8 +240,8 @@ void setup() {
 void processserial(cuchar input1) {
 	static uchar buf[256], buf2[256];
 	static char status = 0;
-	static int pos = 0;
-	static int len = 0;
+	static uint pos = 0;
+	static uint len = 0;
 	static unsigned long lasttime = -1;
 
 	unsigned long newtime;
@@ -217,8 +268,10 @@ void processserial(cuchar input1) {
 			pos++;
 		} else {
 			Serial.println("Process");
-			int retl = doreply(len, buf, buf2);
-			Serial1.write(buf2, retl);
+			uint retlen = doreply(len, buf, buf2);
+			if(retlen > 0) {
+				serialwrite(buf2, retlen);
+			}
 			status = -1;
 		}
 	} else {
@@ -228,6 +281,7 @@ void processserial(cuchar input1) {
 
 void loop() {
 	uchar ret1;
+	processsendbuf();
 	while(Serial1.available()) {
 		ret1 = Serial1.read();
 		processserial(ret1);
