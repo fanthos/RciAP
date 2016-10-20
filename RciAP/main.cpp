@@ -7,14 +7,17 @@ typedef unsigned char uchar;
 typedef const uchar cuchar;
 typedef unsigned int uint;
 typedef const uint cuint;
+typedef unsigned long ulong;
+typedef const ulong culong;
 
 uint playstatus = 0;
 
 cuint STATUS_PUSH = 0x0001;
 
-cuint IAP_BAUDRATE = 19200;
-cuint IAP_BYTEPS = IAP_BAUDRATE / 10;
-cuint IAP_MILLISBUF = 1;
+culong IAP_BAUDRATE = 19200;
+culong IAP_BYTEPS = IAP_BAUDRATE / 10;
+culong IAP_MAXWAIT = 256L * 1000L / IAP_BYTEPS + 1;
+culong IAP_MILLISBUF = 1;
 
 inline void setstatus(cuint flag) {
 	playstatus |= flag;
@@ -47,11 +50,11 @@ cuchar
 	STOP = 10;
 
 void playctrl(cuchar action) {
-	Serial.print("Play Ctrl: ");
+	Serial.print("play: ");
 	Serial.println(action, HEX);
 }
 
-void procunkcmd(const uint len, cuchar recv[], const char lbl[]) {
+void procunkcmd(cuint len, cuchar recv[], const char lbl[]) {
 	Serial.print(lbl);
 	for(uint _i = 0; _i < len; _i++){
 		Serial.print(recv[_i], HEX);
@@ -60,17 +63,24 @@ void procunkcmd(const uint len, cuchar recv[], const char lbl[]) {
 	Serial.println("");
 }
 
-void serialwrite(cuchar buf[], const uint len) {
-	static unsigned long lastsent = 0;
-	unsigned long newsent;
-	const unsigned long sendinterval = 55;
-	unsigned long t;
-	unsigned long sendtime = len * 1000 / IAP_BYTEPS + IAP_MILLISBUF;
-  procunkcmd(len - 2, buf + 2, "send: ");
-  newsent = millis();
-	t = (newsent - lastsent);
-	if(t < sendinterval){
-		delay(sendinterval - t);
+void serialwrite(cuchar buf[], cuint len) {
+	static ulong lastsent = 0;
+	ulong newsent;
+	culong sendinterval = 100;
+	ulong t;
+	ulong sendtime = len * 1000 / IAP_BYTEPS + IAP_MILLISBUF;
+	procunkcmd(len - 2, buf + 2, "send: ");
+	newsent = millis();
+	if(lastsent > newsent) {
+		if(lastsent - newsent > IAP_MAXWAIT) {
+			t = IAP_MAXWAIT;
+		}
+		delay(t + sendinterval);
+	} else {
+		t = (newsent - lastsent);
+		if(t < sendinterval){
+			delay(sendinterval - t);
+		}
 	}
 	lastsent = newsent + sendtime;
 	Serial1.write(buf, len);
@@ -83,14 +93,14 @@ volatile uchar sendbufready = 0;
 
 void processsendbuf() {
 	if(sendbufready == 0)return;
-	Serial.println("ProcBuf");
+	Serial.print("P");
 	sendbuf_data[2] = (uchar)sendbuflen;
 	sendbuf_data[sendbuflen + 3] = calcsum((uchar*)sendbuf_data + 2, sendbuflen + 1);
 	serialwrite((uchar *)sendbuf_data, sendbuflen + 4);
 	sendbufready = 0;
 }
 
-uint doreply(const uint len, cuchar recv[], uchar buf[]) {
+uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 	cuchar
 		//retdata00ack[] = {0,0},
 		retdata0007[] = "MYBT1",
@@ -117,14 +127,16 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 		buf[3] = 0;
 		buf[4] = recv[1] + 1;
 		switch(recv[1]) {
-      case 0x02:
-        return 0;
+			case 0x01:
+			case 0x02:
+				return 0;
 			case 0x13: // Get Device Lingoes
-				if(sendbufready == 0) {
-					memcpy((void*)sendbuf, retdatabuf0013, sizeof(retdatabuf0013));
-					sendbuflen = 3;
-					sendbufready = 1;
+				if(sendbufready == 1) {
+					processsendbuf();
 				}
+				memcpy((void*)sendbuf, retdatabuf0013, sizeof(retdatabuf0013));
+				sendbuflen = 3;
+				sendbufready = 1;
 				// fall to ACK
 			case 0x05: // switch to remote ui
 				rbuf[0] = 0;
@@ -268,13 +280,14 @@ void setup() {
 }
 
 void processserial(cuchar input1) {
-	static uchar buf[256], buf2[256];
+	static uchar _buf[258], buf2[256];
+	static uchar *buf = _buf +1;
 	static char status = 0;
 	static uint pos = 0;
 	static uint len = 0;
-	static unsigned long lasttime = -1;
+	static ulong lasttime = -1;
 
-	unsigned long newtime;
+	ulong newtime;
 	newtime = millis();
 	if(newtime - lasttime > 50) {
 		status = -1;
@@ -297,10 +310,22 @@ void processserial(cuchar input1) {
 			buf[pos] = input1;
 			pos++;
 		} else {
-			uint retlen = doreply(len, buf, buf2);
-      procunkcmd(len, buf, "recv: ");
-			if(retlen > 0) {
-				serialwrite(buf2, retlen);
+			uchar _sum = len + input1;
+			status = 4;
+			for(uint _i = 0; _i < len; _i ++) {
+				_sum += buf[_i];
+			}
+			_buf[0] = len;
+			buf[len] = input1;
+			procunkcmd(len + 2, _buf, "recv: ");
+			if(_sum == 0) {
+				uint retlen = doreply(len, buf, buf2);
+				if(retlen > 0) {
+					serialwrite(buf2, retlen);
+				}
+			} else {
+				Serial.print("sum Failed: ");
+				Serial.println(_sum);
 			}
 			status = -1;
 		}
