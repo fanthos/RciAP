@@ -51,10 +51,10 @@ void playctrl(cuchar action) {
 	Serial.println(action, HEX);
 }
 
-void procunkcmd(const uint len, cuchar recv[]) {
-	Serial.print("Unknown Cmd: ");
+void procunkcmd(const uint len, cuchar recv[], const char lbl[]) {
+	Serial.print(lbl);
 	for(uint _i = 0; _i < len; _i++){
-		Serial.print(recv[_i]);
+		Serial.print(recv[_i], HEX);
 		Serial.print(" ");
 	}
 	Serial.println("");
@@ -62,14 +62,14 @@ void procunkcmd(const uint len, cuchar recv[]) {
 
 void serialwrite(cuchar buf[], const uint len) {
 	static unsigned long lastsent = 0;
-	unsigned long newsent = millis();
+	unsigned long newsent;
 	const unsigned long sendinterval = 55;
 	unsigned long t;
 	unsigned long sendtime = len * 1000 / IAP_BYTEPS + IAP_MILLISBUF;
+  procunkcmd(len - 2, buf + 2, "send: ");
+  newsent = millis();
 	t = (newsent - lastsent);
-	Serial.println(newsent);
 	if(t < sendinterval){
-		Serial.println(sendinterval - t);
 		delay(sendinterval - t);
 	}
 	lastsent = newsent + sendtime;
@@ -117,6 +117,8 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 		buf[3] = 0;
 		buf[4] = recv[1] + 1;
 		switch(recv[1]) {
+      case 0x02:
+        return 0;
 			case 0x13: // Get Device Lingoes
 				if(sendbufready == 0) {
 					memcpy((void*)sendbuf, retdatabuf0013, sizeof(retdatabuf0013));
@@ -163,7 +165,7 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 				rbuf[1] = recv[1];
 				buf[4] = 2;
 				retlen = 2;
-				procunkcmd(len, recv);
+				procunkcmd(len, recv, "Unk: ");
 				break;
 		}
 		retlen += 2;
@@ -250,7 +252,7 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 		}
 		retlen += 3;
 	} else {
-		procunkcmd(len, recv);
+		procunkcmd(len, recv, "Unk: ");
 		return 0;
 	}
 
@@ -295,8 +297,8 @@ void processserial(cuchar input1) {
 			buf[pos] = input1;
 			pos++;
 		} else {
-			Serial.println("Process");
 			uint retlen = doreply(len, buf, buf2);
+      procunkcmd(len, buf, "recv: ");
 			if(retlen > 0) {
 				serialwrite(buf2, retlen);
 			}
