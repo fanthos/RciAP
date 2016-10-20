@@ -3,9 +3,30 @@
 #define WRITERET(x, b, l) l = sizeof(x);memcpy(b,x,l);
 #define R(x) retdata ## x
 
-typedef const unsigned char cuchar;
 typedef unsigned char uchar;
+typedef const uchar cuchar;
 typedef unsigned int uint;
+typedef const uint cuint;
+
+uint playstatus = 0;
+
+cuint STATUS_PUSH = 0x0001;
+
+cuint IAP_BAUDRATE = 19200;
+cuint IAP_BYTEPS = IAP_BAUDRATE / 10;
+cuint IAP_MILLISBUF = 1;
+
+inline void setstatus(cuint flag) {
+	playstatus |= flag;
+}
+
+inline void clearstatus(cuint flag) {
+	playstatus &= ~flag;
+}
+
+inline uchar getstatus(cuint flag) {
+	return (playstatus & flag);
+}
 
 uchar calcsum(cuchar *buf, uint len) {
 	uchar sum = 0;
@@ -42,12 +63,16 @@ void procunkcmd(const uint len, cuchar recv[]) {
 void serialwrite(cuchar buf[], const uint len) {
 	static unsigned long lastsent = 0;
 	unsigned long newsent = millis();
-	const uint sendinterval = 50;
-	unsigned long t = newsent - lastsent;
-	if(t < sendinterval) {
+	const unsigned long sendinterval = 55;
+	unsigned long t;
+	unsigned long sendtime = len * 1000 / IAP_BYTEPS + IAP_MILLISBUF;
+	t = (newsent - lastsent);
+	Serial.println(newsent);
+	if(t < sendinterval){
+		Serial.println(sendinterval - t);
 		delay(sendinterval - t);
 	}
-	lastsent = newsent;
+	lastsent = newsent + sendtime;
 	Serial1.write(buf, len);
 }
 
@@ -87,7 +112,7 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 	buf[0] = 0xff;
 	buf[1] = 0x55;
 
-	if(recv[0] == 0) {
+	if(recv[0] == 0 && len > 1) {
 		uchar *rbuf = buf + 5;
 		buf[3] = 0;
 		buf[4] = recv[1] + 1;
@@ -142,7 +167,7 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 				break;
 		}
 		retlen += 2;
-	} else if (recv[0] == 4) {
+	} else if (recv[0] == 4 && recv[1] == 0 && len > 2) {
 		uchar *rbuf = buf + 6;
 		buf[3] = 4;
 		buf[4] = 0;
@@ -224,6 +249,9 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 				break;
 		}
 		retlen += 3;
+	} else {
+		procunkcmd(len, recv);
+		return 0;
 	}
 
 	buf[2] = retlen;
@@ -234,7 +262,7 @@ uint doreply(const uint len, cuchar recv[], uchar buf[]) {
 
 void setup() {
 	Serial.begin(19200);
-	Serial1.begin(19200);
+	Serial1.begin(IAP_BAUDRATE);
 }
 
 void processserial(cuchar input1) {
@@ -286,4 +314,5 @@ void loop() {
 		ret1 = Serial1.read();
 		processserial(ret1);
 	}
+	delay(5);
 }
