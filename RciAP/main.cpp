@@ -1,7 +1,8 @@
 #include <Arduino.h>
 
-#define WRITERET(x, b, l) l = sizeof(x);memcpy(b,x,l);
+#define WRITERET(x, b, l) l += sizeof(x);memcpy(b,x,l);
 #define R(x) retdata ## x
+#define RL(x) sizeof(retdata ## x)
 
 typedef unsigned char uchar;
 typedef const uchar cuchar;
@@ -35,6 +36,14 @@ inline void mydelay(culong t) {
 	Serial.print("mydelay: ");
 	Serial.println(t);
 	delay(t);
+}
+
+inline ulong uc2ul(uchar a, uchar b, uchar c, uchar d) {
+	ulong t = a;
+	t = t << 8 | b;
+	t = t << 8 | c;
+	t = t << 8 | d;
+	return t;
 }
 
 uchar calcsum(cuchar *buf, uint len) {
@@ -78,7 +87,8 @@ void serialwrite(cuchar buf[], cuint len) {
 	procunkcmd(len - 2, buf + 2, "send: ");
 	newsent = millis();
 	if(lastsent > newsent) {
-		if(lastsent - newsent > IAP_MAXWAIT) {
+		t = lastsent - newsent;
+		if(t > IAP_MAXWAIT) {
 			t = IAP_MAXWAIT;
 		}
 		mydelay(t + sendinterval);
@@ -92,110 +102,119 @@ void serialwrite(cuchar buf[], cuint len) {
 	Serial1.write(buf, len);
 }
 
-volatile uchar sendbuf_data[140] = {0xff, 0x55};
-const volatile uchar *sendbuf = sendbuf_data + 3;
-volatile uint sendbuflen;
-volatile uchar sendbufready = 0;
+uchar sendbuf_data[140] = {0xff, 0x55};
+uchar *sendbuf = sendbuf_data + 3;
+uint sendbuflen;
+uchar sendbufready = 0;
 
 void processsendbuf() {
 	if(sendbufready == 0)return;
-	Serial.print("P");
 	sendbuf_data[2] = (uchar)sendbuflen;
 	sendbuf_data[sendbuflen + 3] = calcsum((uchar*)sendbuf_data + 2, sendbuflen + 1);
 	serialwrite((uchar *)sendbuf_data, sendbuflen + 4);
 	sendbufready = 0;
 }
 
-uint doreply(cuint len, cuchar recv[], uchar buf[]) {
+uint doreply(cuint len, cuchar recv[]) {
 	cuchar
 		//retdata00ack[] = {0,0},
-		retdata0007[] = "MYBT1",
-		retdata0009[] = {8,1,1},
-		retdata000B[] = "MYBT1ABCDEFG",
-		retdata000F[] = {0,1,15},
-		retdata04ack[] = {0,0,0},
-		retdata04ackunk[] = {5,0,0},
+		retdata_0007[] = "MYBT1",
+		retdata_0009[] = {8,1,1},
+		retdata_000B[] = "MYBT1ABCDEFG",
+		retdata_000F[] = {0,1,15},
+		retdata_04ack[] = {0,0,0},
+		retdata_04ackunk[] = {5,0,0},
 		retdata_str[] = "BTAUDIO",
 		//retdata04_0[] = {0},
 		retdata_04str[] = "\0\0\0\0MY888",
-		retdata04_00[] = {0,0,0,0},
-		retdata04_01[] = {0,0,0,1},
-		retdata04_02[] = {0,0,0,2},
-		retdata04_03[] = {0,0,0,3},
-		retdata04_0101[] = {0,0,0,1,0,0,0,1},
-		retdata041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1};
-	cuchar retdataary0028[] = {1,4,4,4,5,6,7};
-	cuchar retdatabuf0013[] = {0x00, 0x27, 0x00};
+		//retdata_00[] = {0,0,0,0},
+		retdata_01[] = {0,0,0,1},
+		retdata_02[] = {0,0,0,2},
+		retdata_03[] = {0,0,0,3},
+		retdata_0101[] = {0,0,0,1,0,0,0,1},
+		retdata_041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1};
+	cuchar retdata_ary0028[] = {1,4,4,4,5,6,7};
+	cuchar retdata_buf0013[] = {0x00, 0x27, 0x00};
 	uint retlen;
-	buf[0] = 0xff;
-	buf[1] = 0x55;
 
 	if(recv[0] == 0 && len > 1) {
-		uchar *rbuf = buf + 5;
-		buf[3] = 0;
-		buf[4] = recv[1] + 1;
+		uchar *rbuf = sendbuf + 2;
+		sendbuf[0] = 0;
+		sendbuf[1] = recv[1] + 1;
+		sendbuflen = 0;
+		const uint headersize = 2;
 		switch(recv[1]) {
 			case 0x01:
 			case 0x02:
 				return 0;
-			case 0x13: // Get Device Lingoes
-				if(sendbufready == 1) {
-					processsendbuf();
-				}
-				memcpy((void*)sendbuf, retdatabuf0013, sizeof(retdatabuf0013));
-				sendbuflen = 3;
-				sendbufready = 1;
+			case 0x03:
+				rbuf[0] = 1;
+				sendbuflen = headersize + 1;
+				break;
 				// fall to ACK
 			case 0x05: // switch to remote ui
 			case 0x06: // switch to remote ui
 				rbuf[0] = 0;
 				rbuf[1] = recv[1];
-				buf[4] = 2;
-				retlen = 2;
-				break;
-			case 0x03:
-				rbuf[0] = 1;
-				retlen = 1;
+				sendbuf[1] = 2;
+				sendbuflen = headersize + 2;
 				break;
 			case 0x07: // get ipod name
-				WRITERET(R(0007),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_0007),rbuf, sendbuflen);
 				break;
 			case 0x09: // get ipod version
-				WRITERET(R(0009),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_0009),rbuf, sendbuflen);
 				break;
 			case 0x0B: // get serial
-				WRITERET(R(000B),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_000B),rbuf, sendbuflen);
 				break;
 			case 0x0D: // Get Device Type
-				WRITERET(R(_04str),rbuf, retlen);
-				buf[1] = 3;
+				sendbuflen = headersize;
+				WRITERET(R(_04str),rbuf, sendbuflen);
+				rbuf[1] = 3;
 				break;
 			case 0x0F: // set lingo protocol version
-				WRITERET(R(000F),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_000F),rbuf, sendbuflen);
 				rbuf[0] = recv[2];
 				break;
+			case 0x13: // Get Device Lingoes
+				sendbuf[0] = 0;
+				sendbuf[1] = 2;
+				sendbuf[2] = 0;
+				sendbuf[3] = 0x13;
+				sendbuflen = headersize + 2;
+				sendbufready = 1;
+				processsendbuf();
+				memcpy((void*)sendbuf, R(_buf0013), RL(_buf0013));
+				sendbuflen = headersize + 1;
+				sendbufready = 1;
+				break;
 			case 0x28:
-				rbuf[0] = retdataary0028[recv[2]];
-				if(rbuf[0] > sizeof(retdataary0028)){
+				rbuf[0] = R(_ary0028)[recv[2]];
+				if(rbuf[0] > RL(_ary0028)){
 					return 0;
 				}
-				retlen = 1;
-				buf[4] = 0x27;
+				sendbuflen = headersize + 1;
+				sendbuf[1] = 0x27;
 				break;
 			default:
 				rbuf[0] = 5;
 				rbuf[1] = recv[1];
-				buf[4] = 2;
-				retlen = 2;
+				sendbuf[1] = 2;
+				sendbuflen = headersize + 2;
 				procunkcmd(len, recv, "!!!Unk: ");
 				break;
 		}
-		retlen += 2;
 	} else if (recv[0] == 4 && recv[1] == 0 && len > 2) {
-		uchar *rbuf = buf + 6;
-		buf[3] = 4;
-		buf[4] = 0;
-		buf[5] = recv[2] + 1;
+		uchar *rbuf = sendbuf + 3;
+		sendbuf[0] = 4;
+		sendbuf[1] = 0;
+		sendbuf[2] = recv[2] + 1;
+		const uint headersize = 3;
 		switch(recv[2]) {
 			uchar action;
 			case 0x04:
@@ -207,47 +226,56 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 			case 0x2E:
 			case 0x31:
 			case 0x38:
-				WRITERET(R(04ack),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
-				buf[5] = 1;
+				sendbuf[2] = 1;
 				break;
 			case 0x02:
-				WRITERET(R(04_0101),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_0101),rbuf, sendbuflen);
 				break;
 			case 0x05:
-				WRITERET(R(04_02),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_02),rbuf, sendbuflen);
 				break;
 			case 0x07:
 			case 0x20:
 			case 0x22:
 			case 0x24:
-				WRITERET(R(_str),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_str),rbuf, sendbuflen);
 				break;
 			case 0x09:
 			case 0x2C:
 			case 0x2F:
-				retlen = 1;
+				sendbuflen = headersize + 1;
 				rbuf[0] = 0;
 				break;
 			case 0x18:
-				WRITERET(R(04_03),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_03),rbuf, sendbuflen);
 				break;
 			case 0x1C:
-				WRITERET(R(041C),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_041C),rbuf, sendbuflen);
 				break;
 			case 0x1E:
-				WRITERET(R(04_01),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_01),rbuf, sendbuflen);
 				break;
 			case 0x35:
-				WRITERET(R(04_03),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_03),rbuf, sendbuflen);
 				break;
 			case 0x1A:
 				{
 					ulong id_s, id_e;
-					id_s = (recv[3] << 24) | (recv[4] << 16) | (recv[5] << 8) | recv[6];
-					id_e = ((recv[7] << 24) | (recv[8] << 16) | (recv[9] << 8) | recv[10]) + id_s;
-					memcpy(rbuf+4, R(_str), sizeof(R(_str)));
-					retlen = sizeof(R(_str)) + 4;
+					id_s = uc2ul(recv[3], recv[4], recv[5], recv[6]);
+					id_e = uc2ul(recv[7], recv[8], recv[9], recv[10]) + id_s;
+					memcpy(rbuf+4, R(_str), RL(_str));
+					sendbuflen = headersize;
+					sendbuflen += RL(_str) + 4;
 					while(id_s < id_e) {
 						if(sendbufready == 1) {
 							processsendbuf();
@@ -256,8 +284,6 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 						rbuf[1] = id_s >> 16;
 						rbuf[2] = id_s >> 8;
 						rbuf[3] = id_s;
-						memcpy((void*)sendbuf, buf + 3, len + 3);
-						sendbuflen = retlen;
 						sendbufready = 1;
 						id_s ++;
 					}
@@ -288,32 +314,34 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 				if(action) {
 					playctrl(action);
 				}
-				WRITERET(R(04ack),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
-				buf[5] = 1;
+				sendbuf[2] = 1;
 				break;
 			case 0x37:
-				WRITERET(R(04ack),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
-				buf[5] = 1;
+				sendbuf[2] = 1;
 				break;
 			default:
-				WRITERET(R(04ackunk),rbuf, retlen);
+				sendbuflen = headersize;
+				WRITERET(R(_04ackunk),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
-				buf[5] = 1;
+				sendbuf[2] = 1;
 				procunkcmd(len, recv, "!!!Unk: ");
 				break;
 		}
-		retlen += 3;
 	} else {
 		procunkcmd(len, recv, "!!!Unk: ");
 		return 0;
 	}
 
-	buf[2] = retlen;
-
-	buf[retlen + 3] = calcsum(buf + 2, retlen + 1);
-	return retlen + 4;
+	if(sendbuflen > 0) {
+		sendbufready = 1;
+	}
+	return retlen;
 }
 
 void setup() {
@@ -322,7 +350,7 @@ void setup() {
 }
 
 void processserial(cuchar input1) {
-	static uchar _buf[258], buf2[256];
+	static uchar _buf[258];
 	static uchar *buf = _buf +1;
 	static char status = 0;
 	static uint pos = 0;
@@ -362,10 +390,7 @@ void processserial(cuchar input1) {
 			procunkcmd(len + 2, _buf, "recv: ");
 			sum += input1;
 			if(sum == 0) {
-				uint retlen = doreply(len, buf, buf2);
-				if(retlen > 0) {
-					serialwrite(buf2, retlen);
-				}
+				doreply(len, buf);
 			} else {
 				Serial.print("!!!chksum: ");
 				Serial.println(sum, HEX);
@@ -385,12 +410,14 @@ void loop() {
 		Serial.println(newrun - lastrun);
 	}
 	lastrun = newrun;
-	int ret1;
-	ret1 = Serial1.read();
-	if(ret1 != -1) {
-		processserial((uchar)ret1);
-	} else {
+	if(sendbufready) {
 		processsendbuf();
+	} else {
+		int ret1;
+		ret1 = Serial1.read();
+		if(ret1 != -1) {
+			processserial((uchar)ret1);
+		}
 	}
 	//mydelay(5);
 }
