@@ -127,7 +127,7 @@ uint doreply(cuint len, cuchar recv[]) {
 		retdata_str[] = "BTAUDIO",
 		//retdata04_0[] = {0},
 		retdata_04str[] = "\0\0\0\0MY888",
-		//retdata_00[] = {0,0,0,0},
+		retdata_00[] = {0,0,0,0},
 		retdata_01[] = {0,0,0,1},
 		retdata_02[] = {0,0,0,2},
 		retdata_03[] = {0,0,0,3},
@@ -144,16 +144,15 @@ uint doreply(cuint len, cuchar recv[]) {
 		sendbuflen = 0;
 		const uint headersize = 2;
 		switch(recv[1]) {
-			case 0x01:
-			case 0x02:
+			case 0x01: // Identify
+			case 0x02: // !ACK
 				return 0;
-			case 0x03:
+			case 0x03: // RequesetRemoteUIMode
 				rbuf[0] = 1;
 				sendbuflen = headersize + 1;
 				break;
-				// fall to ACK
-			case 0x05: // switch to remote ui
-			case 0x06: // switch to remote ui
+			case 0x05: // switch remote ui
+			case 0x06: // Exit remote ui
 				rbuf[0] = 0;
 				rbuf[1] = recv[1];
 				sendbuf[1] = 2;
@@ -176,12 +175,12 @@ uint doreply(cuint len, cuchar recv[]) {
 				WRITERET(R(_04str),rbuf, sendbuflen);
 				rbuf[1] = 3;
 				break;
-			case 0x0F: // set lingo protocol version
+			case 0x0F: // req lingo protocol version
 				sendbuflen = headersize;
 				WRITERET(R(_000F),rbuf, sendbuflen);
 				rbuf[0] = recv[2];
 				break;
-			case 0x13: // Get Device Lingoes
+			case 0x13: // Identify Device Lingoes
 				sendbuf[0] = 0;
 				sendbuf[1] = 2;
 				sendbuf[2] = 0;
@@ -193,7 +192,7 @@ uint doreply(cuint len, cuchar recv[]) {
 				sendbuflen = headersize + 1;
 				sendbufready = 1;
 				break;
-			case 0x28:
+			case 0x28: // Device RetAccessoryInfo
 				rbuf[0] = R(_ary0028)[recv[2]];
 				if(rbuf[0] > RL(_ary0028)){
 					return 0;
@@ -217,58 +216,58 @@ uint doreply(cuint len, cuchar recv[]) {
 		const uint headersize = 3;
 		switch(recv[2]) {
 			uchar action;
-			case 0x04:
-			case 0x0B:
-			case 0x16:
-			case 0x17:
-			case 0x26:
-			case 0x28:
-			case 0x2E:
-			case 0x31:
-			case 0x38:
+			case 0x04: // Set current chapter
+			case 0x0B: // Set audiobook speed
+			case 0x16: // Rest db selection
+			case 0x17: // Select db record
+			case 0x26: // Set PlayStatusChange notification
+			case 0x28: // Play Current Selection
+			case 0x2E: // Set Shuffle
+			case 0x31: // Set Repeat
+			case 0x38: // SelectSortDbRecord
 				sendbuflen = headersize;
 				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
 				break;
-			case 0x02:
+			case 0x02:  // Get current playing info
 				sendbuflen = headersize;
 				WRITERET(R(_0101),rbuf, sendbuflen);
 				break;
-			case 0x05:
+			case 0x05: // Get current play status
 				sendbuflen = headersize;
 				WRITERET(R(_02),rbuf, sendbuflen);
 				break;
-			case 0x07:
-			case 0x20:
-			case 0x22:
-			case 0x24:
+			case 0x07: // Get chapter name
+			case 0x20: // Get Track Title
+			case 0x22: // Get Artist Name
+			case 0x24: // Get Albun name
 				sendbuflen = headersize;
 				WRITERET(R(_str),rbuf, sendbuflen);
 				break;
-			case 0x09:
-			case 0x2C:
-			case 0x2F:
+			case 0x09: // Get audiobook speed
+			case 0x2C: // Get Shuffle
+			case 0x2F: // Get Repeat
 				sendbuflen = headersize + 1;
 				rbuf[0] = 0;
 				break;
-			case 0x18:
+			case 0x18: // Get num of categorized db records
 				sendbuflen = headersize;
-				WRITERET(R(_03),rbuf, sendbuflen);
+				WRITERET(R(_00),rbuf, sendbuflen);
 				break;
-			case 0x1C:
+			case 0x1C: // Get PlayStatus
 				sendbuflen = headersize;
 				WRITERET(R(_041C),rbuf, sendbuflen);
 				break;
-			case 0x1E:
+			case 0x1E: // Get current playing track index
 				sendbuflen = headersize;
 				WRITERET(R(_01),rbuf, sendbuflen);
 				break;
-			case 0x35:
+			case 0x35: // Get num playing tracks
 				sendbuflen = headersize;
 				WRITERET(R(_03),rbuf, sendbuflen);
 				break;
-			case 0x1A:
+			case 0x1A: // Retrieve categorized db records
 				{
 					ulong id_s, id_e;
 					id_e = uc2ul(recv[7], recv[8], recv[9], recv[10]);
@@ -297,7 +296,7 @@ uint doreply(cuint len, cuchar recv[]) {
 					}
 					return 0;
 				}
-			case 0x29:
+			case 0x29: // Play control
 				switch(recv[3]) {
 					case 0x01:
 					case 0x02:
@@ -327,7 +326,7 @@ uint doreply(cuint len, cuchar recv[]) {
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
 				break;
-			case 0x37:
+			case 0x37: // Set play track
 				sendbuflen = headersize;
 				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
