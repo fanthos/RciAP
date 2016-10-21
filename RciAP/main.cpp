@@ -271,8 +271,16 @@ uint doreply(cuint len, cuchar recv[]) {
 			case 0x1A:
 				{
 					ulong id_s, id_e;
-					id_s = uc2ul(recv[3], recv[4], recv[5], recv[6]);
-					id_e = uc2ul(recv[7], recv[8], recv[9], recv[10]) + id_s;
+					id_e = uc2ul(recv[7], recv[8], recv[9], recv[10]);
+					if(id_e == 0xffffffff) {
+						id_s = 0;
+						id_e = 4;
+					} else {
+						id_s = uc2ul(recv[3], recv[4], recv[5], recv[6]);
+						id_e = id_s + id_e;
+						if(id_s > 3)id_s = 3;
+						if(id_e > 4)id_e = 4;
+					}
 					memcpy(rbuf+4, R(_str), RL(_str));
 					sendbuflen = headersize;
 					sendbuflen += RL(_str) + 4;
