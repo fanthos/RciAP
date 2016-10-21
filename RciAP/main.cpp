@@ -31,6 +31,12 @@ inline uchar getstatus(cuint flag) {
 	return (playstatus & flag);
 }
 
+inline void mydelay(culong t) {
+	Serial.print("mydelay: ");
+	Serial.println(t);
+	delay(t);
+}
+
 uchar calcsum(cuchar *buf, uint len) {
 	uchar sum = 0;
 	cuchar *buf1 = buf + len;
@@ -66,7 +72,7 @@ void procunkcmd(cuint len, cuchar recv[], const char lbl[]) {
 void serialwrite(cuchar buf[], cuint len) {
 	static ulong lastsent = 0;
 	ulong newsent;
-	culong sendinterval = 100;
+	culong sendinterval = 10;
 	ulong t;
 	ulong sendtime = len * 1000 / IAP_BYTEPS + IAP_MILLISBUF;
 	procunkcmd(len - 2, buf + 2, "send: ");
@@ -75,11 +81,11 @@ void serialwrite(cuchar buf[], cuint len) {
 		if(lastsent - newsent > IAP_MAXWAIT) {
 			t = IAP_MAXWAIT;
 		}
-		delay(t + sendinterval);
+		mydelay(t + sendinterval);
 	} else {
 		t = (newsent - lastsent);
 		if(t < sendinterval){
-			delay(sendinterval - t);
+			mydelay(sendinterval - t);
 		}
 	}
 	lastsent = newsent + sendtime;
@@ -104,16 +110,18 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 	cuchar
 		//retdata00ack[] = {0,0},
 		retdata0007[] = "MYBT1",
-		retdata0009[] = {3,1,1},
+		retdata0009[] = {8,1,1},
 		retdata000B[] = "MYBT1ABCDEFG",
-		retdata000D[] = "\0\x03\0\0MYBT1",
-		retdata000F[] = {0,1,1},
+		retdata000F[] = {0,1,15},
 		retdata04ack[] = {0,0,0},
 		retdata04ackunk[] = {5,0,0},
-		retdata04str[] = "BTAUDIO",
+		retdata_str[] = "BTAUDIO",
 		//retdata04_0[] = {0},
+		retdata_04str[] = "\0\0\0\0MY888",
 		retdata04_00[] = {0,0,0,0},
 		retdata04_01[] = {0,0,0,1},
+		retdata04_02[] = {0,0,0,2},
+		retdata04_03[] = {0,0,0,3},
 		retdata04_0101[] = {0,0,0,1,0,0,0,1},
 		retdata041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1};
 	cuchar retdataary0028[] = {1,4,4,4,5,6,7};
@@ -139,6 +147,7 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 				sendbufready = 1;
 				// fall to ACK
 			case 0x05: // switch to remote ui
+			case 0x06: // switch to remote ui
 				rbuf[0] = 0;
 				rbuf[1] = recv[1];
 				buf[4] = 2;
@@ -158,7 +167,8 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 				WRITERET(R(000B),rbuf, retlen);
 				break;
 			case 0x0D: // Get Device Type
-				WRITERET(R(000D),rbuf, retlen);
+				WRITERET(R(_04str),rbuf, retlen);
+				buf[1] = 3;
 				break;
 			case 0x0F: // set lingo protocol version
 				WRITERET(R(000F),rbuf, retlen);
@@ -177,7 +187,7 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 				rbuf[1] = recv[1];
 				buf[4] = 2;
 				retlen = 2;
-				procunkcmd(len, recv, "Unk: ");
+				procunkcmd(len, recv, "!!!Unk: ");
 				break;
 		}
 		retlen += 2;
@@ -196,20 +206,22 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 			case 0x28:
 			case 0x2E:
 			case 0x31:
-			case 0x37:
+			case 0x38:
 				WRITERET(R(04ack),rbuf, retlen);
 				rbuf[2] = recv[2];
 				buf[5] = 1;
 				break;
 			case 0x02:
-			case 0x05:
 				WRITERET(R(04_0101),rbuf, retlen);
+				break;
+			case 0x05:
+				WRITERET(R(04_02),rbuf, retlen);
 				break;
 			case 0x07:
 			case 0x20:
 			case 0x22:
 			case 0x24:
-				WRITERET(R(04str),rbuf, retlen);
+				WRITERET(R(_str),rbuf, retlen);
 				break;
 			case 0x09:
 			case 0x2C:
@@ -218,15 +230,39 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 				rbuf[0] = 0;
 				break;
 			case 0x18:
-				WRITERET(R(04_00),rbuf, retlen);
+				WRITERET(R(04_03),rbuf, retlen);
 				break;
 			case 0x1C:
 				WRITERET(R(041C),rbuf, retlen);
 				break;
 			case 0x1E:
-			case 0x35:
 				WRITERET(R(04_01),rbuf, retlen);
 				break;
+			case 0x35:
+				WRITERET(R(04_03),rbuf, retlen);
+				break;
+			case 0x1A:
+				{
+					ulong id_s, id_e;
+					id_s = (recv[3] << 24) | (recv[4] << 16) | (recv[5] << 8) | recv[6];
+					id_e = ((recv[7] << 24) | (recv[8] << 16) | (recv[9] << 8) | recv[10]) + id_s;
+					memcpy(rbuf+4, R(_str), sizeof(R(_str)));
+					retlen = sizeof(R(_str)) + 4;
+					while(id_s < id_e) {
+						if(sendbufready == 1) {
+							processsendbuf();
+						}
+						rbuf[0] = id_s >> 24;
+						rbuf[1] = id_s >> 16;
+						rbuf[2] = id_s >> 8;
+						rbuf[3] = id_s;
+						memcpy((void*)sendbuf, buf + 3, len + 3);
+						sendbuflen = retlen;
+						sendbufready = 1;
+						id_s ++;
+					}
+					return 0;
+				}
 			case 0x29:
 				switch(recv[3]) {
 					case 0x01:
@@ -256,15 +292,21 @@ uint doreply(cuint len, cuchar recv[], uchar buf[]) {
 				rbuf[2] = recv[2];
 				buf[5] = 1;
 				break;
+			case 0x37:
+				WRITERET(R(04ack),rbuf, retlen);
+				rbuf[2] = recv[2];
+				buf[5] = 1;
+				break;
 			default:
 				WRITERET(R(04ackunk),rbuf, retlen);
 				rbuf[2] = recv[2];
 				buf[5] = 1;
+				procunkcmd(len, recv, "!!!Unk: ");
 				break;
 		}
 		retlen += 3;
 	} else {
-		procunkcmd(len, recv, "Unk: ");
+		procunkcmd(len, recv, "!!!Unk: ");
 		return 0;
 	}
 
@@ -285,18 +327,20 @@ void processserial(cuchar input1) {
 	static char status = 0;
 	static uint pos = 0;
 	static uint len = 0;
+	static uchar sum = 0;;
 	static ulong lasttime = -1;
 
 	ulong newtime;
 	newtime = millis();
-	if(newtime - lasttime > 50) {
-		status = -1;
+	if(newtime - lasttime > 100) {
+		//status = -1;
 	}
 	lasttime = newtime;
 	if(status == -1) {
 		status = 0;
 		pos = 0;
 		len = 0;
+		sum = 0;
 	}
 	if(input1 == 0xff && status == 0) {
 		status = 1;
@@ -304,28 +348,27 @@ void processserial(cuchar input1) {
 		status = 2;
 	} else if(status == 2) {
 		len = input1;
+		sum = input1;
 		status = 3;
 	} else if(status == 3) {
 		if(pos < len){
 			buf[pos] = input1;
+			sum += input1;
 			pos++;
 		} else {
-			uchar _sum = len + input1;
 			status = 4;
-			for(uint _i = 0; _i < len; _i ++) {
-				_sum += buf[_i];
-			}
 			_buf[0] = len;
 			buf[len] = input1;
 			procunkcmd(len + 2, _buf, "recv: ");
-			if(_sum == 0) {
+			sum += input1;
+			if(sum == 0) {
 				uint retlen = doreply(len, buf, buf2);
 				if(retlen > 0) {
 					serialwrite(buf2, retlen);
 				}
 			} else {
-				Serial.print("sum Failed: ");
-				Serial.println(_sum);
+				Serial.print("!!!chksum: ");
+				Serial.println(sum, HEX);
 			}
 			status = -1;
 		}
@@ -335,11 +378,19 @@ void processserial(cuchar input1) {
 }
 
 void loop() {
-	uchar ret1;
-	processsendbuf();
-	while(Serial1.available()) {
-		ret1 = Serial1.read();
-		processserial(ret1);
+	static ulong lastrun = 0;
+	ulong newrun = millis();
+	if(newrun - lastrun > 50) {
+		Serial.print("Lagging: ");
+		Serial.println(newrun - lastrun);
 	}
-	delay(5);
+	lastrun = newrun;
+	int ret1;
+	ret1 = Serial1.read();
+	if(ret1 != -1) {
+		processserial((uchar)ret1);
+	} else {
+		processsendbuf();
+	}
+	//mydelay(5);
 }
