@@ -135,6 +135,7 @@ uint doreply(cuint len, cuchar recv[]) {
 		retdata_041C[] = {0,0,0xea,0x60,0,0,0x27,0x10,1};
 	cuchar retdata_ary0028[] = {1,4,4,4,5,6,7};
 	cuchar retdata_buf0013[] = {0x00, 0x27, 0x00};
+	cuchar retdata_d0027[] = {1, 0, 0, 0, 1};
 	uint retlen;
 
 	if(recv[0] == 0 && len > 1) {
@@ -253,7 +254,7 @@ uint doreply(cuint len, cuchar recv[]) {
 				break;
 			case 0x18: // Get num of categorized db records
 				sendbuflen = headersize;
-				WRITERET(R(_00),rbuf, sendbuflen);
+				WRITERET(R(_03),rbuf, sendbuflen);
 				break;
 			case 0x1C: // Get PlayStatus
 				sendbuflen = headersize;
@@ -325,12 +326,27 @@ uint doreply(cuint len, cuchar recv[]) {
 				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
+				sendbufready = 1;
+
+				processsendbuf();
+				sendbuf[2] = 0x27;
+				sendbuflen = headersize;
+				WRITERET(R(_d0027),rbuf, sendbuflen);
+				sendbufready = 1;
+
 				break;
 			case 0x37: // Set play track
 				sendbuflen = headersize;
 				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
 				sendbuf[2] = 1;
+				sendbufready = 1;
+				processsendbuf();
+
+				sendbuf[2] = 0x27;
+				sendbuflen = headersize;
+				WRITERET(R(_d0027),rbuf, sendbuflen);
+				sendbufready = 1;
 				break;
 			default:
 				sendbuflen = headersize;
