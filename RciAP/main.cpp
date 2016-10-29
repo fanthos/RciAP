@@ -20,6 +20,10 @@ culong IAP_BYTEPS = IAP_BAUDRATE / 10;
 culong IAP_MAXWAIT = 256L * 1000L / IAP_BYTEPS + 1;
 culong IAP_MILLISBUF = 1;
 
+const unsigned char CTRLPIN_PLAY = 2;
+const unsigned char CTRLPIN_NEXT = 3;
+const unsigned char CTRLPIN_PREV = 4;
+
 inline void setstatus(cuint flag) {
 	playstatus |= flag;
 }
@@ -33,8 +37,8 @@ inline uchar getstatus(cuint flag) {
 }
 
 inline void mydelay(culong t) {
-	Serial.print("mydelay: ");
-	Serial.println(t);
+	//SerialDbg.print("mydelay: ");
+	//SerialDbg.println(t);
 	delay(t);
 }
 
@@ -65,17 +69,60 @@ cuchar
 	STOP = 10;
 
 void playctrl(cuchar action) {
-	Serial.print("play: ");
-	Serial.println(action, HEX);
+	static uchar lastaction = NONE;
+	static ulong lastactiontime = 0;
+	ulong ctime = millis();
+	ulong utime = ctime - lastactiontime;
+	if(action == NONE) {
+		if(lastaction == NONE) {
+			return;
+		}
+		if(utime < 100L) {
+			return;
+		}
+		digitalWrite(CTRLPIN_PLAY, 0);
+		digitalWrite(CTRLPIN_NEXT, 0);
+		digitalWrite(CTRLPIN_PREV, 0);
+		lastaction = NONE;
+		return;
+	}
+	if(lastaction != NONE) {
+		if(utime < 100L) {
+			delay(min(100L, 100L-utime));
+		}
+		digitalWrite(CTRLPIN_PLAY, 0);
+		digitalWrite(CTRLPIN_NEXT, 0);
+		digitalWrite(CTRLPIN_PREV, 0);
+	}
+
+	lastaction = action;
+	lastactiontime = millis();
+	switch(action) {
+		case PLAY: 
+		case PAUSE:
+		case STOP:
+			digitalWrite(CTRLPIN_PLAY, 1);
+			break;
+		case NEXT: 
+			digitalWrite(CTRLPIN_NEXT, 1);
+			break;
+		case PREV: 
+			digitalWrite(CTRLPIN_PREV, 1);
+			break;
+		default:
+			lastaction = NONE;
+	}
+	//SerialDbg.print("play: ");
+	//SerialDbg.println(action, HEX);
 }
 
 void procunkcmd(cuint len, cuchar recv[], const char lbl[]) {
-	Serial.print(lbl);
+	//SerialDbg.print(lbl);
 	for(uint _i = 0; _i < len; _i++){
-		Serial.print(recv[_i], HEX);
-		Serial.print(" ");
+		//SerialDbg.print(recv[_i], HEX);
+		//SerialDbg.print(" ");
 	}
-	Serial.println("");
+	//SerialDbg.println("");
 }
 
 void serialwrite(cuchar buf[], cuint len) {
@@ -99,7 +146,7 @@ void serialwrite(cuchar buf[], cuint len) {
 		}
 	}
 	lastsent = newsent + sendtime;
-	Serial1.write(buf, len);
+	Serial.write(buf, len);
 }
 
 uchar sendbuf_data[140] = {0xff, 0x55};
@@ -336,6 +383,20 @@ uint doreply(cuint len, cuchar recv[]) {
 
 				break;
 			case 0x37: // Set play track
+				switch(recv[6]) {
+					case 0:
+						action = PREV;
+						break;
+					case 2:
+						action = NEXT;
+						break;
+					default:
+						action = NONE;
+						break;
+				}
+				if(action) {
+					playctrl(action);
+				}
 				sendbuflen = headersize;
 				WRITERET(R(_04ack),rbuf, sendbuflen);
 				rbuf[2] = recv[2];
@@ -368,8 +429,11 @@ uint doreply(cuint len, cuchar recv[]) {
 }
 
 void setup() {
-	Serial.begin(19200);
-	Serial1.begin(IAP_BAUDRATE);
+	//SerialDbg.begin(19200);
+	Serial.begin(IAP_BAUDRATE);
+	pinMode(CTRLPIN_PLAY, OUTPUT);
+	pinMode(CTRLPIN_NEXT, OUTPUT);
+	pinMode(CTRLPIN_PREV, OUTPUT);
 }
 
 void processserial(cuchar input1) {
@@ -415,8 +479,8 @@ void processserial(cuchar input1) {
 			if(sum == 0) {
 				doreply(len, buf);
 			} else {
-				Serial.print("!!!chksum: ");
-				Serial.println(sum, HEX);
+				//SerialDbg.print("!!!chksum: ");
+				//SerialDbg.println(sum, HEX);
 			}
 			status = -1;
 		}
@@ -429,15 +493,16 @@ void loop() {
 	static ulong lastrun = 0;
 	ulong newrun = millis();
 	if(newrun - lastrun > 50) {
-		Serial.print("Lagging: ");
-		Serial.println(newrun - lastrun);
+		//SerialDbg.print("Lagging: ");
+		//SerialDbg.println(newrun - lastrun);
 	}
 	lastrun = newrun;
+	playctrl(NONE);
 	if(sendbufready) {
 		processsendbuf();
 	} else {
 		int ret1;
-		ret1 = Serial1.read();
+		ret1 = Serial.read();
 		if(ret1 != -1) {
 			processserial((uchar)ret1);
 		}
